@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<title>塔防遊戲</title>
+<style>
+body { background:#222; color:white; text-align:center; font-family:sans-serif; }
+canvas { border:2px solid white; cursor:pointer; }
+button { margin:3px; }
+</style>
+</head>
+<body>
+
+<h2>🏰 塔防遊戲</h2>
+<p>
+主塔血量：<span id="hp">100</span>｜
+金錢：<span id="gold">500</span>｜
+波數：<span id="wave">1</span>｜
+<span id="wait"></span>
+</p>
+
+<div>
+<button onclick="select('sword')">🗡️ 劍士</button>
+<button onclick="select('archer')">🏹 弓箭手</button>
+<button onclick="select('mage')">🪄 法師</button>
+<button onclick="select('farm')">💰 農場</button>
+<button onclick="select('wall')">🛡️ 堡壘</button>
+</div>
+
+<canvas id="game" width="640" height="360"></canvas>
+
+<script>
+const c = document.getElementById("game");
+const ctx = c.getContext("2d");
+
+let baseHp=100, gold=500, wave=1;
+let selected=null, waiting=false, gameOver=false;
+let selectedTower=null;
+
+const towers=[], enemies=[];
+
+const towerData={
+  sword:{cost:100,dmg:5,range:60,cd:30,icon:"🗡️"},
+  archer:{cost:250,dmg:10,range:110,cd:40,icon:"🏹"},
+  mage:{cost:500,dmg:20,range:140,cd:60,icon:"🪄"},
+  farm:{cost:300,icon:"💰"},
+  wall:{cost:600,hp:100,range:18,icon:"🛡️"}
+};
+
+const enemyHpStage=[10,15,20,25,30];
+
+const path=[
+  {x:0,y:180},{x:140,y:180},{x:140,y:80},
+  {x:340,y:80},{x:340,y:260},{x:540,y:260},{x:640,y:180}
+];
+
+// 🌳 背景樹
+const trees=Array.from({length:6},()=>({
+  x:Math.random()*600+20,
+  y:Math.random()*320+20
+}));
+
+function select(t){ selected=t; }
+
+function onPath(x,y){
+  for(let i=0;i<path.length-1;i++){
+    let a=path[i],b=path[i+1];
+    if(Math.abs(x-a.x)<20 && y>Math.min(a.y,b.y)-20 && y<Math.max(a.y,b.y)+20) return true;
+    if(Math.abs(y-a.y)<20 && x>Math.min(a.x,b.x)-20 && x<Math.max(a.x,b.x)+20) return true;
+  }
+  return false;
+}
+
+// 點擊
+c.onclick=e=>{
+  if(gameOver) return;
+  let x=e.offsetX,y=e.offsetY;
+  selectedTower=null;
+
+  for(let t of towers){
+    if(Math.hypot(t.x-x,t.y-y)<20){
+      selectedTower=t;
+      return;
+    }
+  }
+
+  if(!selected) return;
+  let d=towerData[selected];
+  if(gold<d.cost) return;
+
+  if(selected!=="wall" && onPath(x,y)) return alert("不能放在道路上");
+
+  for(let t of towers)
+    if(Math.hypot(t.x-x,t.y-y)<40) return alert("距離太近");
+
+  gold-=d.cost;
+  towers.push({
+    x,y,type:selected,
+    dmg:d.dmg||0,range:d.range||0,
+    cdMax:d.cd||0,cd:0,
+    hp:d.hp||0,hitCd:0,
+    cost:d.cost,icon:d.icon
+  });
+};
+
+// 右鍵刪除
+c.oncontextmenu=e=>{
+  e.preventDefault();
+  let x=e.offsetX,y=e.offsetY;
+  for(let i=towers.length-1;i>=0;i--)
+    if(Math.hypot(towers[i].x-x,towers[i].y-y)<20){
+      towers.splice(i,1);
+      selectedTower=null;
+      return;
+    }
+};
+
+// 生怪（一次全部出）
+function spawnWave(){
+  let stage=Math.floor((wave-1)/5);
+  let hp=enemyHpStage[stage];
+  let count=10;
+  for(let i=0;i<count;i++)
+    enemies.push({hp,max:hp,p:0,i:i*35});
+}
+spawnWave();
+
+function update(){
+  if(gameOver) return;
+
+  // 草地
+  ctx.fillStyle="#9be38a";
+  ctx.fillRect(0,0,640,360);
+
+  // 路
+  ctx.strokeStyle="#c2a060";
+  ctx.lineWidth=30;
+  ctx.beginPath();
+  ctx.moveTo(path[0].x,path[0].y);
+  path.forEach(p=>ctx.lineTo(p.x,p.y));
+  ctx.stroke();
+
+  // 樹
+  trees.forEach(t=>{
+    ctx.fillStyle="brown";
+    ctx.fillRect(t.x-3,t.y,6,10);
+    ctx.beginPath();
+    ctx.fillStyle="darkgreen";
+    ctx.arc(t.x,t.y,12,0,Math.PI*2);
+    ctx.fill();
+  });
+
+  // 顯示範圍
+  if(selectedTower && selectedTower.range){
+    ctx.beginPath();
+    ctx.strokeStyle="rgba(0,0,255,0.4)";
+    ctx.arc(selectedTower.x,selectedTower.y,selectedTower.range,0,Math.PI*2);
+    ctx.stroke();
+  }
+
+  // 塔
+  ctx.font="20px serif";
+  towers.forEach(t=>{
+    ctx.fillText(t.icon,t.x-10,t.y+8);
+    ctx.font="12px sans-serif";
+    ctx.fillText(`$${t.cost}`,t.x-14,t.y+22);
+    ctx.font="20px serif";
+  });
+
+  // 敵人
+  ctx.font="18px serif";
+  enemies.forEach(e=>{
+    let a=path[e.p],b=path[e.p+1];
+    let dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy);
+    e.i+=1;
+    let t=e.i/len;
+    if(t>=1){e.p++;e.i=0;}
+    if(e.p>=path.length-1){baseHp-=5;e.hp=0;}
+    e.x=a.x+dx*t; e.y=a.y+dy*t;
+
+    ctx.fillText("🧟",e.x-10,e.y+8);
+    ctx.fillStyle="red";
+    ctx.fillText(e.hp,e.x-8,e.y-12);
+    ctx.fillStyle="white";
+  });
+
+  // 攻擊
+  towers.forEach(t=>{
+    if(t.type==="wall"){
+      if(t.hitCd>0) t.hitCd--;
+      enemies.forEach(e=>{
+        if(Math.hypot(t.x-e.x,t.y-e.y)<t.range && t.hitCd<=0){
+          t.hp--; e.hp--;
+          t.hitCd=15;
+        }
+      });
+      return;
+    }
+
+    if(t.cd>0){t.cd--;return;}
+    let target=null,min=999;
+    enemies.forEach(e=>{
+      let d=Math.hypot(t.x-e.x,t.y-e.y);
+      if(d<t.range && d<min){min=d;target=e;}
+    });
+    if(target){
+      target.hp-=t.dmg;
+      t.cd=t.cdMax;
+    }
+  });
+
+  // 清除
+  for(let i=enemies.length-1;i>=0;i--)
+    if(enemies[i].hp<=0){ enemies.splice(i,1); gold+=5; }
+  for(let i=towers.length-1;i>=0;i--)
+    if(towers[i].type==="wall" && towers[i].hp<=0)
+      towers.splice(i,1);
+
+  // 波次
+  if(enemies.length===0 && !waiting){
+    if(wave>=25){
+      gameOver=true;
+      setTimeout(()=>{
+        if(confirm("🎉 你贏了！\n再來一場？")) location.reload();
+      },300);
+      return;
+    }
+    waiting=true;
+    let t=5;
+    document.getElementById("wait").innerText=`下一波 ${t}s`;
+    let timer=setInterval(()=>{
+      t--;
+      document.getElementById("wait").innerText=`下一波 ${t}s`;
+      if(t<=0){
+        clearInterval(timer);
+        waiting=false;
+        document.getElementById("wait").innerText="";
+        towers.forEach(tt=>{ if(tt.type==="farm") gold+=150; });
+        wave++; spawnWave();
+      }
+    },1000);
+  }
+
+  document.getElementById("hp").innerText=baseHp;
+  document.getElementById("gold").innerText=gold;
+  document.getElementById("wave").innerText=wave;
+}
+
+setInterval(update,30);
+</script>
+</body>
+</html>
